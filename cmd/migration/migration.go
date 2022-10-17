@@ -1,4 +1,4 @@
-package migration
+package main
 
 import (
 	"context"
@@ -20,10 +20,12 @@ type NewSchema struct {
 
 const topic = "example.migrate"
 
-func RunMigrationRouter(logger watermill.LoggerAdapter) (*message.Router, error) {
+var logger = watermill.NewStdLogger(false, false)
+
+func main() {
 	router, err := message.NewRouter(message.RouterConfig{}, logger)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 	pubSub := gochannel.NewGoChannel(gochannel.Config{}, logger)
 	handler := router.AddHandler("migratedHandler", topic, pubSub, "", nil, func(msg *message.Message) ([]*message.Message, error) {
@@ -63,7 +65,6 @@ func RunMigrationRouter(logger watermill.LoggerAdapter) (*message.Router, error)
 	if err := router.Run(ctx); err != nil {
 		panic(err)
 	}
-	return router, nil
 }
 
 func pub(publisher message.Publisher) {
