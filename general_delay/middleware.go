@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+//TODO: 可以加入死信队列的设计
 type DelayRetry struct {
 	pubDelay5s message.Publisher
 	subDelay5s message.Subscriber
