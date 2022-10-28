@@ -13,7 +13,8 @@ import (
 var logger = watermill.NewStdLogger(false, false)
 
 const (
-	topic = "example.general_delay"
+	topic       = "example.general_delay"
+	handlerName = "example"
 )
 
 func main() {
@@ -23,13 +24,13 @@ func main() {
 	}
 	pubSub := gochannel.NewGoChannel(gochannel.Config{}, logger)
 
-	m, err := general_delay.NewDelayRetry(pubSub, topic)
+	m, err := general_delay.NewDelayRetry(router, pubSub, pubSub, handlerName, topic, 5)
 	m.MaxRetries = 3
 	if err != nil {
 		panic(err)
 	}
 	router.AddMiddleware(m.Middleware)
-	router.AddNoPublisherHandler("example", topic, pubSub, func(msg *message.Message) error {
+	router.AddNoPublisherHandler(handlerName, topic, pubSub, func(msg *message.Message) error {
 		log.Printf("message %s retries %s", msg.UUID, msg.Metadata.Get("retries"))
 		return errors.New("always fail")
 	})

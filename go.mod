@@ -3,7 +3,7 @@ module eventbus-example
 go 1.16
 
 require (
-	github.com/ThreeDotsLabs/watermill v1.1.1 // indirect
-	github.com/google/uuid v1.3.0 // indirect
-	github.com/lithammer/shortuuid/v3 v3.0.7 // indirect
+	github.com/Shopify/sarama v1.32.0
+	github.com/ThreeDotsLabs/watermill v1.1.1
+	github.com/ThreeDotsLabs/watermill-kafka/v2 v2.2.2
 )

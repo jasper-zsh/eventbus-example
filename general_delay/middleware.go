@@ -1,47 +1,55 @@
 package general_delay
 
 import (
-	"context"
+	"eventbus-example/eventbus/types"
+	"fmt"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"log"
 	"strconv"
 	"time"
 )
 
-//TODO: 可以加入死信队列的设计
+type DelayRetryConfig struct {
+	MaxRetries     int
+	DelaySeconds   int64
+	Topic          string
+	ConsumerPrefix string
+	HandlerName    string
+}
+
 type DelayRetry struct {
-	pubDelay5s message.Publisher
-	subDelay5s message.Subscriber
+	logger     watermill.LoggerAdapter
+	config     DelayRetryConfig
+	delayPub   message.Publisher
+	delaySub   message.Subscriber
 	publisher  message.Publisher
-	topic      string
 	router     *message.Router
-	MaxRetries int
+	deadTopic  string
+	delayTopic string
 }
 
 const (
-	headerNextTick = "next_tick"
-	headerRetries  = "retries"
-	topicDelay5s   = "delay_5s"
+	headerNextTick = "Next-Tick"
+	headerRetries  = "Retries"
 )
 
-var logger = watermill.NewStdLogger(false, false)
-
-func NewDelayRetry(publisher message.Publisher, topic string) (*DelayRetry, error) {
-	pubSub := gochannel.NewGoChannel(gochannel.Config{}, logger)
-	router, err := message.NewRouter(message.RouterConfig{}, logger)
+func NewDelayRetry(router *message.Router, publisher message.Publisher, subscriberFactory types.SubscriberFactory, config DelayRetryConfig, logger watermill.LoggerAdapter) (*DelayRetry, error) {
+	r := &DelayRetry{
+		logger:    logger,
+		config:    config,
+		delayPub:  publisher,
+		publisher: publisher,
+		router:    router,
+	}
+	r.delayTopic = fmt.Sprintf("%s.%s.delay_%ds", config.Topic, config.HandlerName, config.DelaySeconds)
+	r.deadTopic = fmt.Sprintf("%s.%s.dead", config.Topic, config.HandlerName)
+	var err error
+	r.delaySub, err = subscriberFactory(r.delayTopic, "retry", logger)
 	if err != nil {
 		return nil, err
 	}
-	r := &DelayRetry{
-		pubDelay5s: pubSub,
-		subDelay5s: pubSub,
-		publisher:  publisher,
-		topic:      topic,
-		router:     router,
-	}
-	router.AddNoPublisherHandler("delay_5s", topicDelay5s, r.subDelay5s, func(msg *message.Message) error {
+	router.AddNoPublisherHandler(fmt.Sprintf("%s:%s", config.ConsumerPrefix, r.delayTopic), r.delayTopic, r.delaySub, func(msg *message.Message) error {
 		nextTickStr := msg.Metadata.Get(headerNextTick)
 		if nextTickStr != "" {
 			nextTick, _ := strconv.ParseInt(nextTickStr, 10, 64)
@@ -54,15 +62,18 @@ func NewDelayRetry(publisher message.Publisher, topic string) (*DelayRetry, erro
 			retriesStr = "0"
 		}
 		retries, _ := strconv.Atoi(retriesStr)
-		if retries >= r.MaxRetries {
-			log.Printf("message %s out of retries, dropped.", msg.UUID)
+		if r.config.MaxRetries > 0 && retries >= r.config.MaxRetries {
+			log.Printf("message %s out of retries, published to dead topic.", msg.UUID)
+			err := r.publisher.Publish(r.deadTopic, msg)
+			if err != nil {
+				return err
+			}
 			return nil
 		}
 		msg.Metadata.Set(headerRetries, strconv.Itoa(retries+1))
 
-		return r.publisher.Publish(r.topic, msg)
+		return r.publisher.Publish(r.config.Topic, msg)
 	})
-	go router.Run(context.Background())
 	return r, nil
 }
 
@@ -73,7 +84,7 @@ func (r DelayRetry) Middleware(h message.HandlerFunc) message.HandlerFunc {
 			return producedMessages, nil
 		}
 
-		msg.Metadata.Set(headerNextTick, strconv.FormatInt(time.Now().Unix()+5, 10))
-		return nil, r.pubDelay5s.Publish(topicDelay5s, msg)
+		msg.Metadata.Set(headerNextTick, strconv.FormatInt(time.Now().Unix()+r.config.DelaySeconds, 10))
+		return nil, r.delayPub.Publish(r.delayTopic, msg)
 	}
 }
